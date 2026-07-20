@@ -32,7 +32,7 @@ jobs:
           docker build \
             -t summershalloween/summershalloween:${{ env.BUILD_NUMBER }} \
             -f SummersManorHalloweenPuzzle/Dockerfile.webapp \
-            .
+            SummersManorHalloweenPuzzle
 
       - name: Tag image for Nexus
         run: |

@@ -1,0 +1,70 @@
+name: Dev Pipeline
+
+on:
+  push:
+    branches:
+      - 'dev/*'
+    paths-ignore:
+      - 'k8s/**'
+
+env:
+  BUILD_NUMBER: 1.0.${{ github.run_number }}
+
+jobs:
+  BuildAndDeploy:
+    name: Build & Deploy to Dev
+    runs-on: [self-hosted, linux, docker, kubernetes]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Kustomize
+        run: |
+          mkdir -p ~/.local/bin
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          mv kustomize ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t summershalloween/summershalloween:${{ env.BUILD_NUMBER }} \
+            -f SummersManorHalloweenPuzzle/Dockerfile.webapp \
+            .
+
+      - name: Tag image for Nexus
+        run: |
+          docker tag summershalloween/summershalloween:${{ env.BUILD_NUMBER }} nexus.summershome.duckdns.org/summershalloween/summershalloween:dev.${{ env.BUILD_NUMBER }}
+
+      - name: Login to Nexus
+        run: |
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login nexus.summershome.duckdns.org -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
+
+      - name: Push image to Nexus
+        run: |
+          docker push nexus.summershome.duckdns.org/summershalloween/summershalloween:dev.${{ env.BUILD_NUMBER }}
+
+      - name: Update kustomize image tag (dev)
+        working-directory: k8s/overlays/dev
+        run: |
+          kustomize edit set image nexus.summershome.duckdns.org/summershalloween/summershalloween:dev.${{ env.BUILD_NUMBER }}
+
+      - name: Deploy to dev cluster
+        run: |
+          kubectl apply -k k8s/overlays/dev
+          kubectl rollout status deployment/webapp -n halloween-web-app-dev --timeout=180s
+
+      - name: Commit updated image tag
+        run: |
+          git config user.email "pipeline@devops"
+          git config user.name "GitHub Action"
+          BRANCH="${{ github.ref_name }}"
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          git add k8s/overlays/dev/kustomization.yaml
+          git diff --staged --quiet && echo "No changes to commit." && exit 0
+          git commit -m "Update dev image tag to ${{ env.BUILD_NUMBER }} ***NO_CI***"
+          git rebase origin/"$BRANCH"
+          git push origin HEAD:"$BRANCH"

@@ -50,6 +50,9 @@ jobs:
     environment: ${{ inputs.github_environment }}
     permissions:
       contents: read
+    env:
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+      DOTNET_ROOT: ${{ runner.temp }}/dotnet
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,6 +64,11 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "9.0.x"
+
+      - name: Ensure .NET path
+        run: |
+          echo "${DOTNET_INSTALL_DIR}" >> $GITHUB_PATH
+          echo "DOTNET_ROOT=${DOTNET_INSTALL_DIR}" >> $GITHUB_ENV
 
       - name: Setup GitVersion
         uses: gittools/actions/gitversion/setup@v3.0.3

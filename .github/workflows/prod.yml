@@ -1,61 +1,51 @@
 name: Prod Pipeline
 
 on:
-  workflow_run:
-    workflows: ["Test Pipeline"]
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Commit SHA to deploy (optional, defaults to the latest successful test run on master)"
+        required: false
+        type: string
 
 jobs:
-  VerifyDev:
-    name: Verify latest Dev deployment
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'
+  ResolveSha:
+    name: Resolve commit to deploy
     runs-on: [self-hosted, Linux, docker, kubernetes]
-    permissions:
-      actions: read
+    outputs:
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
     steps:
-      - name: Verify latest dev deployment succeeded
+      - name: Resolve SHA
+        id: resolve
         uses: actions/github-script@v7
         with:
           script: |
-            const { owner, repo } = context.repo;
-            const runs = await github.rest.actions.listWorkflowRuns({
-              owner,
-              repo,
-              workflow_id: 'dev.yml',
-              event: 'push',
-              status: 'completed',
-              per_page: 1
-            });
-            if (!runs.data.workflow_runs.length) {
-              core.setFailed('No completed Dev Pipeline run found.');
-              return;
+            let sha = "${{ github.event.inputs.commit_sha }}".trim();
+            if (!sha) {
+              const { owner, repo } = context.repo;
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: 'test.yml',
+                status: 'completed',
+                conclusion: 'success',
+                branch: 'master',
+                per_page: 1
+              });
+              if (!runs.data.workflow_runs.length) {
+                core.setFailed('No successful Test Pipeline run found on master.');
+                return;
+              }
+              sha = runs.data.workflow_runs[0].head_sha;
+              console.log(`Resolved latest successful Test Pipeline run SHA: ${sha}`);
+            } else {
+              console.log(`Using user-supplied SHA: ${sha}`);
             }
-            const latest = runs.data.workflow_runs[0];
-            if (latest.conclusion !== 'success') {
-              core.setFailed(`Latest Dev Pipeline run is '${latest.conclusion}', not 'success'.`);
-            }
-
-  ApproveProd:
-    name: Wait for manual approval
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'
-    needs: VerifyDev
-    runs-on: [self-hosted, Linux, docker, kubernetes]
-    permissions:
-      issues: write
-    steps:
-      - name: Wait for manual approval
-        uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ secrets.GITHUB_TOKEN }}
-          approvers: forevercamaros
-          minimum-approvals: 1
-          issue-title: "Deploying run #${{ github.event.workflow_run.run_number }} (SHA ${{ github.event.workflow_run.head_sha }}) to Prod"
-          issue-body: "Please approve or deny the production deployment of run #${{ github.event.workflow_run.run_number }}."
+            core.setOutput('commit_sha', sha);
 
   DeployProd:
     name: Promote (if needed) & Deploy Prod
-    needs: ApproveProd
+    needs: ResolveSha
     uses: ./.github/workflows/reusable-deploy.yml
     with:
       github_environment: PROD
@@ -64,5 +54,5 @@ jobs:
       deploy_mode: promote
       source_tag_prefix: test
       target_tag_prefix: prod
-      commit_sha: ${{ github.event.workflow_run.head_sha }}
+      commit_sha: ${{ needs.ResolveSha.outputs.commit_sha }}
     secrets: inherit

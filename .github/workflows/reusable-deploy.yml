@@ -64,13 +64,10 @@ jobs:
       - name: Detect app code changes
         id: changes
         run: |
-          if [ -n "${{ inputs.diff_base }}" ]; then
+          if [ -n "${{ inputs.diff_base }}" ] && [ "${{ inputs.diff_base }}" != "0000000000000000000000000000000000000000" ]; then
             CHANGED_FILES="$(git diff --name-only "${{ inputs.diff_base }}" "${{ inputs.commit_sha }}" || true)"
           else
-            CHANGED_FILES="$(git show --pretty="" --name-only "${{ inputs.commit_sha }}")"
-          fi
-          if [ -z "$CHANGED_FILES" ]; then
-            CHANGED_FILES="$(git show --pretty="" --name-only "${{ inputs.commit_sha }}")"
+            CHANGED_FILES="$(git show --pretty="" --name-only -m "${{ inputs.commit_sha }}" || true)"
           fi
 
           if echo "$CHANGED_FILES" | grep -qE '^(SummersManorHalloweenPuzzle/|src/|SummersManorHalloweenPuzzle\.sln$)'; then

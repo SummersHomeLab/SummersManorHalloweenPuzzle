@@ -1,0 +1,174 @@
+name: Reusable Deploy
+
+on:
+  workflow_call:
+    inputs:
+      github_environment:
+        required: true
+        type: string
+      overlay_path:
+        required: true
+        type: string
+      namespace:
+        required: true
+        type: string
+      deploy_mode:
+        required: true
+        type: string
+      target_tag_prefix:
+        required: true
+        type: string
+      source_tag_prefix:
+        required: false
+        type: string
+        default: ""
+      commit_sha:
+        required: true
+        type: string
+      diff_base:
+        required: false
+        type: string
+        default: ""
+      registry:
+        required: false
+        type: string
+        default: nexus.summershome.duckdns.org
+      image_name:
+        required: false
+        type: string
+        default: summershalloween/summershalloween
+      version_mode:
+        required: false
+        type: string
+        default: gitversion
+    secrets:
+      NEXUS_USERNAME:
+        required: true
+      NEXUS_PASSWORD:
+        required: true
+
+jobs:
+  Deploy:
+    name: Deploy ${{ inputs.github_environment }}
+    runs-on: [self-hosted, Linux, docker, kubernetes]
+    environment: ${{ inputs.github_environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Detect app code changes
+        id: changes
+        run: |
+          if [ -n "${{ inputs.diff_base }}" ]; then
+            CHANGED_FILES="$(git diff --name-only "${{ inputs.diff_base }}" "${{ inputs.commit_sha }}" || true)"
+          else
+            CHANGED_FILES="$(git show --pretty="" --name-only "${{ inputs.commit_sha }}")"
+          fi
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES="$(git show --pretty="" --name-only "${{ inputs.commit_sha }}")"
+          fi
+
+          if echo "$CHANGED_FILES" | grep -qE '^(SummersManorHalloweenPuzzle/|src/|SummersManorHalloweenPuzzle\.sln$)'; then
+            echo "app_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup .NET SDK
+        if: steps.changes.outputs.app_changed == 'true' && inputs.version_mode == 'gitversion'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+        env:
+          DOTNET_INSTALL_DIR: ${{ github.workspace }}/.dotnet
+          DOTNET_ROOT: ${{ github.workspace }}/.dotnet
+
+      - name: Ensure .NET path
+        if: steps.changes.outputs.app_changed == 'true' && inputs.version_mode == 'gitversion'
+        run: |
+          echo "${{ github.workspace }}/.dotnet" >> $GITHUB_PATH
+          echo "DOTNET_ROOT=${{ github.workspace }}/.dotnet" >> $GITHUB_ENV
+
+      - name: Setup GitVersion
+        if: steps.changes.outputs.app_changed == 'true' && inputs.version_mode == 'gitversion'
+        uses: gittools/actions/gitversion/setup@v3.0.3
+        with:
+          versionSpec: "6.0.x"
+
+      - name: Calculate version
+        if: steps.changes.outputs.app_changed == 'true' && inputs.version_mode == 'gitversion'
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v3.0.3
+
+      - name: Resolve image version
+        if: steps.changes.outputs.app_changed == 'true'
+        id: version
+        run: |
+          if [ "${{ inputs.version_mode }}" = "gitversion" ]; then
+            BASE_VERSION="${{ steps.gitversion.outputs.semVer }}"
+            case "${{ inputs.target_tag_prefix }}" in
+              test) TARGET_TAG="${BASE_VERSION}-test" ;;
+              prod) TARGET_TAG="${BASE_VERSION}" ;;
+              *) TARGET_TAG="${{ inputs.target_tag_prefix }}.${BASE_VERSION}" ;;
+            esac
+            case "${{ inputs.source_tag_prefix }}" in
+              test) SOURCE_TAG="${BASE_VERSION}-test" ;;
+              prod) SOURCE_TAG="${BASE_VERSION}" ;;
+              "") SOURCE_TAG="" ;;
+              *) SOURCE_TAG="${{ inputs.source_tag_prefix }}.${BASE_VERSION}" ;;
+            esac
+          else
+            SHORT_SHA="$(echo "${{ inputs.commit_sha }}" | cut -c1-8)"
+            TARGET_TAG="${{ inputs.target_tag_prefix }}.r${{ github.run_number }}-${SHORT_SHA}"
+            SOURCE_TAG=""
+          fi
+          echo "target_tag=${TARGET_TAG}" >> "$GITHUB_OUTPUT"
+          echo "source_tag=${SOURCE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Kustomize
+        run: |
+          mkdir -p ~/.local/bin
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          mv kustomize ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build Docker image
+        if: steps.changes.outputs.app_changed == 'true' && inputs.deploy_mode == 'build'
+        run: |
+          docker build \
+            -t ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.version.outputs.target_tag }} \
+            -f SummersManorHalloweenPuzzle/Dockerfile.webapp \
+            SummersManorHalloweenPuzzle
+
+      - name: Login to Nexus
+        if: steps.changes.outputs.app_changed == 'true'
+        run: |
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login ${{ inputs.registry }} -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
+
+      - name: Push built image
+        if: steps.changes.outputs.app_changed == 'true' && inputs.deploy_mode == 'build'
+        run: |
+          docker push ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.version.outputs.target_tag }}
+
+      - name: Promote image
+        if: steps.changes.outputs.app_changed == 'true' && inputs.deploy_mode == 'promote'
+        run: |
+          docker pull ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.version.outputs.source_tag }}
+          docker tag ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.version.outputs.source_tag }} ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.version.outputs.target_tag }}
+          docker push ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.version.outputs.target_tag }}
+
+      - name: Update image in overlay
+        if: steps.changes.outputs.app_changed == 'true'
+        working-directory: ${{ inputs.overlay_path }}
+        run: |
+          kustomize edit set image ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.version.outputs.target_tag }}
+
+      - name: Deploy overlay
+        run: |
+          kubectl apply -k ${{ inputs.overlay_path }}
+          kubectl rollout status deployment/webapp -n ${{ inputs.namespace }} --timeout=180s

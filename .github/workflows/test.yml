@@ -1,21 +1,20 @@
-name: Dev Pipeline
+name: Test Pipeline
 
 on:
   push:
     branches:
-      - "dev/*"
+      - master
 
 jobs:
-  DeployDev:
+  DeployTest:
     if: github.actor != 'github-actions[bot]'
     uses: ./.github/workflows/reusable-deploy.yml
     with:
-      github_environment: DEV
-      overlay_path: k8s/overlays/dev
-      namespace: halloween-web-app-dev
+      github_environment: TEST
+      overlay_path: k8s/overlays/test
+      namespace: halloween-web-app-test
       deploy_mode: build
-      target_tag_prefix: dev
-      version_mode: run
+      target_tag_prefix: test
       commit_sha: ${{ github.sha }}
       diff_base: ${{ github.event.before }}
     secrets: inherit

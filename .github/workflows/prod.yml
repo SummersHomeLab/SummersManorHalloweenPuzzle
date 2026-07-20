@@ -1,0 +1,52 @@
+name: Prod Pipeline
+
+on:
+  workflow_run:
+    workflows: ["Test Pipeline"]
+    types:
+      - completed
+
+jobs:
+  VerifyDev:
+    name: Verify latest Dev deployment
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'
+    runs-on: [self-hosted, Linux, docker, kubernetes]
+    permissions:
+      actions: read
+    steps:
+      - name: Verify latest dev deployment succeeded
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: 'dev.yml',
+              event: 'push',
+              status: 'completed',
+              per_page: 1
+            });
+            if (!runs.data.workflow_runs.length) {
+              core.setFailed('No completed Dev Pipeline run found.');
+              return;
+            }
+            const latest = runs.data.workflow_runs[0];
+            if (latest.conclusion !== 'success') {
+              core.setFailed(`Latest Dev Pipeline run is '${latest.conclusion}', not 'success'.`);
+            }
+
+  DeployProd:
+    name: Promote (if needed) & Deploy Prod
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'
+    needs: VerifyDev
+    uses: ./.github/workflows/reusable-deploy.yml
+    with:
+      github_environment: PROD
+      overlay_path: k8s/overlays/prod
+      namespace: halloween-web-app
+      deploy_mode: promote
+      source_tag_prefix: test
+      target_tag_prefix: prod
+      commit_sha: ${{ github.event.workflow_run.head_sha }}
+    secrets: inherit

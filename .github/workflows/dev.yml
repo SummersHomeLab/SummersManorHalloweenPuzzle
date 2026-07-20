@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - 'dev/*'
-    paths-ignore:
-      - 'k8s/**'
 
 env:
   BUILD_NUMBER: 1.0.${{ github.run_number }}
@@ -13,6 +11,7 @@ env:
 jobs:
   BuildAndDeploy:
     name: Build & Deploy to Dev
+    if: github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '***NO_CI***')
     runs-on: [self-hosted, Linux, docker, kubernetes]
     permissions:
       contents: write

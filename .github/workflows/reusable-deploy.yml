@@ -57,6 +57,11 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
 
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
       - name: Setup GitVersion
         uses: gittools/actions/gitversion/setup@v3.0.3
         with:

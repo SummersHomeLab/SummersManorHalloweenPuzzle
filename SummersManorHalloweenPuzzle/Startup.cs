@@ -1,4 +1,4 @@
-//Adding this command to force a pipeline rebuild. Will delete laters
+//Adding this command to force a pipeline rebuild. Will delete later.
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpsPolicy;

@@ -1,38 +1,32 @@
-# Build stage
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 
 RUN echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf \
     && echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
 
-# Install dependencies in fewer layers
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs \
-    && apt-get clean \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY ["SummersManorHalloweenPuzzle.csproj", "SummersManorHalloweenPuzzle/"]
-COPY . SummersManorHalloweenPuzzle/
-WORKDIR /src/SummersManorHalloweenPuzzle
-COPY . .
-RUN dotnet publish "SummersManorHalloweenPuzzle.csproj" -c Release -o /app/publish
+COPY ["SummersManorHalloweenPuzzle.csproj", "./"]
+RUN dotnet restore "SummersManorHalloweenPuzzle.csproj"
 
-# Runtime stage - use minimal runtime image
+COPY . .
+RUN dotnet publish "SummersManorHalloweenPuzzle.csproj" -c Release -o /app/publish --no-restore
+
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 
 RUN echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf \
     && echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
 
-# Install only runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libpng16-16 \
     libjpeg62-turbo \
     libxi6 \
     libgl1-mesa-glx \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -1,0 +1,13 @@
+mode: ContinuousDeployment
+branches:
+  master:
+    regex: ^master$
+    increment: Patch
+    label: ""
+    is-main-branch: true
+  dev:
+    regex: ^dev[/-]
+    increment: Minor
+    label: dev
+    source-branches:
+      - master

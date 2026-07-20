@@ -1,0 +1,128 @@
+name: Reusable Deploy
+
+on:
+  workflow_call:
+    inputs:
+      github_environment:
+        required: true
+        type: string
+      overlay_path:
+        required: true
+        type: string
+      namespace:
+        required: true
+        type: string
+      deploy_mode:
+        required: true
+        type: string
+      target_tag_prefix:
+        required: true
+        type: string
+      source_tag_prefix:
+        required: false
+        type: string
+        default: ""
+      commit_sha:
+        required: true
+        type: string
+      diff_base:
+        required: false
+        type: string
+        default: ""
+      registry:
+        required: false
+        type: string
+        default: nexus.summershome.duckdns.org
+      image_name:
+        required: false
+        type: string
+        default: summershalloween/summershalloween
+    secrets:
+      NEXUS_USERNAME:
+        required: true
+      NEXUS_PASSWORD:
+        required: true
+
+jobs:
+  Deploy:
+    name: Deploy ${{ inputs.github_environment }}
+    runs-on: [self-hosted, Linux, docker, kubernetes]
+    environment: ${{ inputs.github_environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Setup GitVersion
+        uses: gittools/actions/gitversion/setup@v3.0.3
+        with:
+          versionSpec: "6.x"
+
+      - name: Calculate version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v3.0.3
+
+      - name: Detect app code changes
+        id: changes
+        run: |
+          if [ -n "${{ inputs.diff_base }}" ]; then
+            CHANGED_FILES="$(git diff --name-only "${{ inputs.diff_base }}" "${{ inputs.commit_sha }}" || true)"
+          else
+            CHANGED_FILES="$(git show --pretty="" --name-only "${{ inputs.commit_sha }}")"
+          fi
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES="$(git show --pretty="" --name-only "${{ inputs.commit_sha }}")"
+          fi
+
+          if echo "$CHANGED_FILES" | grep -qE '^(SummersManorHalloweenPuzzle/|src/|SummersManorHalloweenPuzzle\.sln$)'; then
+            echo "app_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Kustomize
+        run: |
+          mkdir -p ~/.local/bin
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          mv kustomize ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build Docker image
+        if: steps.changes.outputs.app_changed == 'true' && inputs.deploy_mode == 'build'
+        run: |
+          docker build \
+            -t ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.target_tag_prefix }}.${{ steps.gitversion.outputs.semVer }} \
+            -f SummersManorHalloweenPuzzle/Dockerfile.webapp \
+            SummersManorHalloweenPuzzle
+
+      - name: Login to Nexus
+        if: steps.changes.outputs.app_changed == 'true'
+        run: |
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login ${{ inputs.registry }} -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
+
+      - name: Push built image
+        if: steps.changes.outputs.app_changed == 'true' && inputs.deploy_mode == 'build'
+        run: |
+          docker push ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.target_tag_prefix }}.${{ steps.gitversion.outputs.semVer }}
+
+      - name: Promote image
+        if: steps.changes.outputs.app_changed == 'true' && inputs.deploy_mode == 'promote'
+        run: |
+          docker pull ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.source_tag_prefix }}.${{ steps.gitversion.outputs.semVer }}
+          docker tag ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.source_tag_prefix }}.${{ steps.gitversion.outputs.semVer }} ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.target_tag_prefix }}.${{ steps.gitversion.outputs.semVer }}
+          docker push ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.target_tag_prefix }}.${{ steps.gitversion.outputs.semVer }}
+
+      - name: Update image in overlay
+        if: steps.changes.outputs.app_changed == 'true'
+        working-directory: ${{ inputs.overlay_path }}
+        run: |
+          kustomize edit set image ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.target_tag_prefix }}.${{ steps.gitversion.outputs.semVer }}
+
+      - name: Deploy overlay
+        run: |
+          kubectl apply -k ${{ inputs.overlay_path }}
+          kubectl rollout status deployment/webapp -n ${{ inputs.namespace }} --timeout=180s

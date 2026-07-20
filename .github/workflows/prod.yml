@@ -45,7 +45,7 @@ jobs:
       issues: write
     steps:
       - name: Wait for manual approval
-        uses: trstringer/manual-approval@v2
+        uses: trstringer/manual-approval@v1
         with:
           secret: ${{ secrets.GITHUB_TOKEN }}
           approvers: forevercamaros

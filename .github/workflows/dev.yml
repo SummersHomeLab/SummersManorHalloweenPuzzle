@@ -15,6 +15,7 @@ jobs:
       namespace: halloween-web-app-dev
       deploy_mode: build
       target_tag_prefix: dev
+      version_mode: run
       commit_sha: ${{ github.sha }}
       diff_base: ${{ github.event.before }}
     secrets: inherit

@@ -36,10 +36,26 @@ jobs:
               core.setFailed(`Latest Dev Pipeline run is '${latest.conclusion}', not 'success'.`);
             }
 
-  DeployProd:
-    name: Promote (if needed) & Deploy Prod
+  ApproveProd:
+    name: Wait for manual approval
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'
     needs: VerifyDev
+    runs-on: [self-hosted, Linux, docker, kubernetes]
+    permissions:
+      issues: write
+    steps:
+      - name: Wait for manual approval
+        uses: trstringer/manual-approval@v2
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: forevercamaros
+          minimum-approvals: 1
+          issue-title: "Deploying run #${{ github.event.workflow_run.run_number }} (SHA ${{ github.event.workflow_run.head_sha }}) to Prod"
+          issue-body: "Please approve or deny the production deployment of run #${{ github.event.workflow_run.run_number }}."
+
+  DeployProd:
+    name: Promote (if needed) & Deploy Prod
+    needs: ApproveProd
     uses: ./.github/workflows/reusable-deploy.yml
     with:
       github_environment: PROD

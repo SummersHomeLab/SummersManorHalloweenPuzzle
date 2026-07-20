@@ -12,6 +12,8 @@ jobs:
   ResolveSha:
     name: Resolve commit to deploy
     runs-on: [self-hosted, Linux, docker, kubernetes]
+    permissions:
+      actions: read
     outputs:
       commit_sha: ${{ steps.resolve.outputs.commit_sha }}
     steps:

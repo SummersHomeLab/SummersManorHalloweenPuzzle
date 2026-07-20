@@ -18,6 +18,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect change scope
+        id: change_scope
+        run: |
+          CHANGED_FILES="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" || true)"
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES="$(git show --pretty="" --name-only "${{ github.sha }}")"
+          fi
+          if echo "$CHANGED_FILES" | grep -qvE '^(k8s/|$)'; then
+            echo "non_k8s_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "non_k8s_changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install Kustomize
         run: |
@@ -27,6 +42,7 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Build Docker image
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker build \
             -t summershalloween/summershalloween:${{ env.BUILD_NUMBER }} \
@@ -34,18 +50,22 @@ jobs:
             SummersManorHalloweenPuzzle
 
       - name: Tag image for Nexus
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker tag summershalloween/summershalloween:${{ env.BUILD_NUMBER }} nexus.summershome.duckdns.org/summershalloween/summershalloween:dev.${{ env.BUILD_NUMBER }}
 
       - name: Login to Nexus
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           echo "${{ secrets.NEXUS_PASSWORD }}" | docker login nexus.summershome.duckdns.org -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
 
       - name: Push image to Nexus
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker push nexus.summershome.duckdns.org/summershalloween/summershalloween:dev.${{ env.BUILD_NUMBER }}
 
       - name: Update kustomize image tag (dev)
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         working-directory: k8s/overlays/dev
         run: |
           kustomize edit set image nexus.summershome.duckdns.org/summershalloween/summershalloween:dev.${{ env.BUILD_NUMBER }}
@@ -56,6 +76,7 @@ jobs:
           kubectl rollout status deployment/webapp -n halloween-web-app-dev --timeout=180s
 
       - name: Commit updated image tag
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           git config user.email "pipeline@devops"
           git config user.name "GitHub Action"

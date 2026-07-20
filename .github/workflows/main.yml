@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - 'k8s/**'
 
 env:
   BUILD_NUMBER: 1.0.${{ github.run_number }}
@@ -13,12 +11,28 @@ env:
 jobs:
   BuildAndDeployTest:
     name: Build & Deploy to Test
+    if: github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '***NO_CI***')
     runs-on: [self-hosted, Linux, docker, kubernetes]
     permissions:
       contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect change scope
+        id: change_scope
+        run: |
+          CHANGED_FILES="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" || true)"
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES="$(git show --pretty="" --name-only "${{ github.sha }}")"
+          fi
+          if echo "$CHANGED_FILES" | grep -qvE '^(k8s/|$)'; then
+            echo "non_k8s_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "non_k8s_changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install Kustomize
         run: |
@@ -28,10 +42,12 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Prune all Docker images
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker image prune -a -f
 
       - name: Build Docker image
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker build --no-cache \
             -t summershalloween/summershalloween:${{ env.BUILD_NUMBER }} \
@@ -39,18 +55,22 @@ jobs:
             SummersManorHalloweenPuzzle
 
       - name: Tag image for Nexus Test
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker tag summershalloween/summershalloween:${{ env.BUILD_NUMBER }} nexus.summershome.duckdns.org/summershalloween/summershalloween:test.${{ env.BUILD_NUMBER }}
 
       - name: Login to Nexus
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           echo "${{ secrets.NEXUS_PASSWORD }}" | docker login nexus.summershome.duckdns.org -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
 
       - name: Push image to Nexus Test
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker push nexus.summershome.duckdns.org/summershalloween/summershalloween:test.${{ env.BUILD_NUMBER }}
 
       - name: Update kustomize image tag (test)
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         working-directory: k8s/overlays/test
         run: |
           kustomize edit set image nexus.summershome.duckdns.org/summershalloween/summershalloween:test.${{ env.BUILD_NUMBER }}
@@ -60,6 +80,7 @@ jobs:
           kubectl apply -k k8s/overlays/test
 
       - name: Commit updated image tag (test)
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           git config user.email "pipeline@devops"
           git config user.name "GitHub Action"
@@ -81,6 +102,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect change scope
+        id: change_scope
+        run: |
+          CHANGED_FILES="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" || true)"
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES="$(git show --pretty="" --name-only "${{ github.sha }}")"
+          fi
+          if echo "$CHANGED_FILES" | grep -qvE '^(k8s/|$)'; then
+            echo "non_k8s_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "non_k8s_changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install Kustomize
         run: |
@@ -90,22 +126,27 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Login to Nexus
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           echo "${{ secrets.NEXUS_PASSWORD }}" | docker login nexus.summershome.duckdns.org -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
 
       - name: Pull test image from Nexus
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker pull nexus.summershome.duckdns.org/summershalloween/summershalloween:test.${{ env.BUILD_NUMBER }}
 
       - name: Tag image for Nexus Prod
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker tag nexus.summershome.duckdns.org/summershalloween/summershalloween:test.${{ env.BUILD_NUMBER }} nexus.summershome.duckdns.org/summershalloween/summershalloween:prod.${{ env.BUILD_NUMBER }}
 
       - name: Push image to Nexus Prod
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           docker push nexus.summershome.duckdns.org/summershalloween/summershalloween:prod.${{ env.BUILD_NUMBER }}
 
       - name: Update kustomize image tag (prod)
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         working-directory: k8s/overlays/prod
         run: |
           kustomize edit set image nexus.summershome.duckdns.org/summershalloween/summershalloween:prod.${{ env.BUILD_NUMBER }}
@@ -115,6 +156,7 @@ jobs:
           kubectl apply -k k8s/overlays/prod
 
       - name: Commit updated image tag (prod)
+        if: steps.change_scope.outputs.non_k8s_changed == 'true'
         run: |
           git config user.email "pipeline@devops"
           git config user.name "GitHub Action"

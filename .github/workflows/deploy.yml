@@ -10,7 +10,7 @@ on:
 jobs:
   Deploy:
     name: Apply k8s Config Changes
-    runs-on: [self-hosted, linux, docker, kubernetes]
+    runs-on: [self-hosted, Linux, docker, kubernetes]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

@@ -13,7 +13,7 @@ env:
 jobs:
   BuildAndDeploy:
     name: Build & Deploy to Dev
-    runs-on: [self-hosted, linux, docker, kubernetes]
+    runs-on: [self-hosted, Linux, docker, kubernetes]
     permissions:
       contents: write
     steps:

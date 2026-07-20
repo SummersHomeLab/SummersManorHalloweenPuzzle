@@ -13,7 +13,7 @@ env:
 jobs:
   BuildAndDeployTest:
     name: Build & Deploy to Test
-    runs-on: [self-hosted, linux, docker, kubernetes]
+    runs-on: [self-hosted, Linux, docker, kubernetes]
     permissions:
       contents: write
     steps:
@@ -74,7 +74,7 @@ jobs:
   DeployToProd:
     name: Deploy To Prod
     needs: BuildAndDeployTest
-    runs-on: [self-hosted, linux, docker, kubernetes]
+    runs-on: [self-hosted, Linux, docker, kubernetes]
     permissions:
       contents: write
     environment: PROD

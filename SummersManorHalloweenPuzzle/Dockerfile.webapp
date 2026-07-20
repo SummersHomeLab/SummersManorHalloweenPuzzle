@@ -1,7 +1,8 @@
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 
-RUN echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+RUN echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf \
+    && echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
 
 # Install dependencies in fewer layers
 RUN apt-get update && apt-get install -y \
@@ -26,7 +27,8 @@ RUN dotnet publish "SummersManorHalloweenPuzzle.csproj" -c Release -o /app/publi
 # Runtime stage - use minimal runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 
-RUN echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+RUN echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf \
+    && echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
 
 # Install only runtime dependencies
 RUN apt-get update && apt-get install -y \
